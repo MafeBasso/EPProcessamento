@@ -68,10 +68,10 @@ class Main():
         text_file.write(file_path + "\n")
         text_file.write(str(image_height) + " " + str(image_width)+"\n")
 
-        start_height = (image_height * 2)/10
-        end_height = (image_height * 8)/10
-        start_width = (image_width * 2)/10
-        end_width = (image_width * 8)/10
+        start_image_height = (image_height * 2)/10
+        end_image_height = (image_height * 8)/10
+        start_image_width = (image_width * 2)/10
+        end_image_width = (image_width * 8)/10
 
         cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = cnts[0] if len(cnts) == 2 else cnts[1]
@@ -82,33 +82,78 @@ class Main():
         for cnt in cnts:
             approx = cv2.contourArea(cnt)
             x,y,w,h = cv2.boundingRect(cnt)
-            multiplication = w*h
-            if (start_height < y < end_height and start_width < x < end_width):
-                if (3.0 < approx < 2000 and approx > 2*multiplication/10):
-                    df = df.append(pd.Series([file, x, y, h, w, approx, multiplication, image_height, image_width]), ignore_index=True)
+            area_draw_rect = w*h
+            if (start_image_height < y < end_image_height and start_image_width < x < end_image_width):
+                if (3.0 < approx < 2000 and approx > 2*area_draw_rect/10):
+                    df = pd.concat([df, pd.DataFrame([[file, x, y, h, w, approx, area_draw_rect, image_height, image_width]])], ignore_index=True)
                     cv2.rectangle(result,(x,y),(x+w,y+h),(0,255,0),2)
                     text_file.write("w:" + str(w) + " ")
                     text_file.write("h:" + str(h) + " ")
                     text_file.write("x:" + str(x) + " ")
                     text_file.write("y:" + str(y) + " ")
                     text_file.write(str(approx) + "\n")
-
+        
+        #se ainda tem mais de 2 retângulos
         if (df.shape[0] > 2):
+            #altura e largura do retangulo tem que ser maior que 5 e a aproximação da sua área tem que ser maior que 50
             df = df[(df[df.columns[3]] > 5.0) & (df[df.columns[4]] > 5.0) & (df[df.columns[5]] > 50.0)]
-            print(df)
             df.reset_index(drop=True, inplace=True)
+            #se ainda tem mais de 1 retângulo
+            if (df.shape[0] > 1):
+                print(df)
+                center_height = image_height/2
+                center_width = image_width/2
+                for index, row in df.iterrows():
+                    height = df.at[index, 3]
+                    width = df.at[index, 4]
+                    x_rect = df.at[index, 1]
+                    y_rect = df.at[index, 2]
+                    #se a altura do retângulo é maior que sua largura
+                    if (height > width):
+                        end_height_dist = y_rect + height
+                        if (y_rect <= center_height <= end_height_dist):
+                            df.at[index, 6] = 0.0
+                            df.at[index, 9] = 'h'
+                        else:
+                            start_center_height_dist = abs(y_rect - center_height)
+                            end_center_height_dist = abs(end_height_dist - center_height)
+                            if (start_center_height_dist <= end_center_height_dist):
+                                df.at[index, 6] = start_center_height_dist
+                                df.at[index, 9] = 'h'
+                            else:
+                                df.at[index, 6] = end_center_height_dist
+                                df.at[index, 9] = 'h'
+                    else:
+                        end_width_dist = x_rect + width
+                        if (x_rect <= center_width <= end_width_dist):
+                            df.at[index, 6] = 0.0
+                            df.at[index, 9] = 'w'
+                        else:
+                            start_center_width_dist = abs(x_rect - center_width)
+                            end_center_width_dist = abs(end_width_dist - center_width)
+                            if (start_center_width_dist <= end_center_width_dist):
+                                df.at[index, 6] = start_center_width_dist
+                                df.at[index, 9] = 'w'
+                            else:
+                                df.at[index, 6] = end_center_width_dist
+                                df.at[index, 9] = 'w'
+                df.sort_values(by=[6], inplace=True)
+                df = df[(df[df.columns[6]] <= 50.0)]
+                print(df)
+                df.reset_index(drop=True, inplace=True)
+
         
         text_file.write("\n")
         #configuração da janela para aparecer na tela
         # cv2.namedWindow( "mask", cv2.WINDOW_NORMAL)
-        # cv2.namedWindow('result '+file_path, cv2.WINDOW_NORMAL)
+        cv2.namedWindow('result '+file_path, cv2.WINDOW_NORMAL)
         # cv2.namedWindow( "result_edges", cv2.WINDOW_NORMAL)
 
         #mostrar na tela
         # cv2.imshow('mask', mask)
-        # cv2.imshow('result '+file_path, result)
+        cv2.imshow('result '+file_path, result)
         # cv2.imshow('result_edges', result_edges)
-        # cv2.waitKey()
+        cv2.waitKey()
 
         return df
 
