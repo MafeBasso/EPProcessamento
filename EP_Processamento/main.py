@@ -11,9 +11,9 @@ class Main():
         for file_path in files_path:
             mask, result, result_edges, image_height, image_width = Main.find_red_lines(self, file_path)
             df = Main.print_images(self, mask, result, result_edges, file_path, text_file, image_height, image_width)
-            df_final = df_final.append(df)
+            df_final = pd.concat([df_final, df])
         text_file.close()
-        df_final.columns = ['File', 'x', 'y', 'h', 'w', 'approx', 'w*h', 'image_height', 'image_width']
+        df_final.columns = ['File', 'x', 'y', 'h', 'w', 'approx', 'w*h', 'image_height', 'image_width', 'resultado']
         df_final.sort_values(by=['File'], inplace=True)
         df_final.reset_index(drop=True, inplace=True)
         df_final.to_excel(os.path.join(os.path.join(os.path.abspath(os.path.dirname(__file__))), 'dataframe.xlsx'), index=False)
@@ -100,7 +100,6 @@ class Main():
             df.reset_index(drop=True, inplace=True)
             #se ainda tem mais de 1 retângulo
             if (df.shape[0] > 1):
-                print(df)
                 center_height = image_height/2
                 center_width = image_width/2
                 for index, row in df.iterrows():
@@ -139,21 +138,54 @@ class Main():
                                 df.at[index, 9] = 'w'
                 df.sort_values(by=[6], inplace=True)
                 df = df[(df[df.columns[6]] <= 50.0)]
-                print(df)
                 df.reset_index(drop=True, inplace=True)
-
+                if (df.shape[0] > 1):
+                    print(df)
+                    stop = False
+                    for index in range(0, df.shape[0]-1):
+                        if(stop == True):
+                            break
+                        for index_next_rect in range(index+1, df.shape[0]):
+                            if(df.at[index, 9] == df.at[index_next_rect, 9]):
+                                if(df.at[index, 9] == 'h'):
+                                    y_proximit = abs(df.at[index, 2] - df.at[index_next_rect, 2])
+                                    if (y_proximit <= 3.0):
+                                        df = pd.concat([df.loc[[index]], df.loc[[index_next_rect]]])
+                                        print(df)
+                                        df.reset_index(drop=True, inplace=True)
+                                        stop = True
+                                        break
+                                elif(df.at[index, 9] == 'w'):
+                                    h_proximit = abs(df.at[index, 3] - df.at[index_next_rect, 3])
+                                    if (h_proximit < 2.0):
+                                        df = pd.concat([df.loc[[index]], df.loc[[index_next_rect]]])
+                                        print(df)
+                                        df.reset_index(drop=True, inplace=True)
+                                        stop = True
+                                        break
+            if (df.shape[1] == 10):
+                df = df.drop(9, axis=1)
         
+        if(df.shape[0] == 0):
+            df = pd.concat([df, pd.DataFrame([[file, 0, 0, 0, 0, 0, 0, image_height, image_width, 'nenhuma linha encontrada']])], ignore_index=True)
+        elif(df.shape[0] == 1):
+            df.at[0, 9] = 'negativo'
+        elif(df.shape[0] == 2):
+            df.loc[:, 9] = 'positivo'
+        else:
+            df.loc[:, 9] = 'muito vermelho que pode ser uma linha de teste'
+
         text_file.write("\n")
         #configuração da janela para aparecer na tela
         # cv2.namedWindow( "mask", cv2.WINDOW_NORMAL)
-        cv2.namedWindow('result '+file_path, cv2.WINDOW_NORMAL)
+        # cv2.namedWindow('result '+file_path, cv2.WINDOW_NORMAL)
         # cv2.namedWindow( "result_edges", cv2.WINDOW_NORMAL)
 
         #mostrar na tela
         # cv2.imshow('mask', mask)
-        cv2.imshow('result '+file_path, result)
+        # cv2.imshow('result '+file_path, result)
         # cv2.imshow('result_edges', result_edges)
-        cv2.waitKey()
+        # cv2.waitKey()
 
         return df
 
