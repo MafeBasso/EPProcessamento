@@ -5,188 +5,264 @@ import pandas as pd
 
 class Main():
     def __init__(self):
-        files_path = Main.list_files(self)
-        text_file = open(os.path.join(os.path.abspath(os.path.dirname(__file__)), "results.txt"), "w")
+        #caminhos das imagens dos testes
+        files_path, dir_path = Main.list_files(self)
+        #inicialização do dataframe final
         df_final = pd.DataFrame()
+        #para cada caminho
         for file_path in files_path:
-            mask, result, result_edges, image_height, image_width = Main.find_red_lines(self, file_path)
-            df = Main.print_images(self, mask, result, result_edges, file_path, text_file, image_height, image_width)
-            df_final = pd.concat([df_final, df])
-        text_file.close()
-        df_final.columns = ['File', 'x', 'y', 'h', 'w', 'approx', 'w*h', 'image_height', 'image_width', 'resultado']
-        df_final.sort_values(by=['File'], inplace=True)
+            #encontrar vermelho na imagem
+            mask, image, image_height, image_width = Main.find_red(self, file_path)
+            #encontrar as linhas de teste
+            df, file = Main.find_lines(self, file_path, image_height, image_width, mask)
+            #desenha retângulo no que foi encontrado como linha de teste
+            Main.draw_found_rectangles(self, df, image)
+            #salva a imagem desenhada em um diretório chamado resultados
+            cv2.imwrite(os.path.join(os.path.join(dir_path, 'resultados'), os.path.basename(file_path).split('.')[0]+'.jpg'), image)
+            #resultado do teste
+            df_resultado = Main.write_results(self, df, file)
+            #junta com o dataframe final
+            df_final = pd.concat([df_final, df_resultado])
+        #nomeia as colunas do dataframe
+        df_final.columns = ['Imagem', 'Resultado']
+        #ordena os valores por nome da imagem
+        df_final.sort_values(by=['Imagem'], inplace=True)
+        #reseta os índices do datafrane
         df_final.reset_index(drop=True, inplace=True)
+        #cria um excel chamado dataframe com o dataframe final
         df_final.to_excel(os.path.join(os.path.join(os.path.abspath(os.path.dirname(__file__))), 'dataframe.xlsx'), index=False)
         
     def list_files(self):
+        #caminho do diretório desse arquivo
         dir_path = os.path.abspath(os.path.dirname(__file__))
+        
+        #todos os caminhos dos arquivos com 'teste'
         files_path = [os.path.join(dir_path, file) for file in os.listdir(dir_path) if file.startswith("teste")]
-        return files_path
+        
+        #retorna os caminhos e o diretório
+        return files_path, dir_path
 
-    def find_red_lines(self, file_path):
+    def find_red(self, file_path):
         #leitura da imagem
         image = cv2.imread(file_path)
         
-        #imagem em escala de cinza
-        image_grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        #econtra as bordas com o algoritmo de Canny
-        edges_image = cv2.Canny(image_grayscale, 50, 150)
-        
-        #aplica o filtro de dilatação na imagem das bordas
-        dialated = cv2.dilate(edges_image, cv2.getStructuringElement(cv2.MORPH_CROSS,(4,4)), iterations = 2)
-        
-        #retira da imagem original tudo aquilo que não está na máscara
-        result_edges = cv2.bitwise_and(image, image, mask=dialated)
-        
-        #criação inicial da imagem resultado como cópia da original
-        result = image.copy()
-        
-        #conversão da imagem somente com as bordas de RGB para HSV
+        #conversão da imagem para HSV
         image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         
-        #valores máximo e mínimo para vermelho em HSV
+        #máscaras dos valores máximos e mínimos para vermelho em HSV encontrados na imagem em HSV
         mask1 = cv2.inRange(image_hsv, (0,50,50), (10,255,255))
         mask2 = cv2.inRange(image_hsv, (145,30,50), (180,255,255))
 
-        ## Merge the mask and crop the red regions
+        #junção das máscaras
         mask = cv2.bitwise_or(mask1, mask2)
-        # lower = np.array([100,50,20])
-        # upper = np.array([180,255,255])
-        
-        #máscara para selecionar as partes da imagem que estão entre esses valores
-        # mask = cv2.inRange(image_hsv, lower, upper)
-        # mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS,(3,3)), iterations = 3)
-        
-        #retira da imagem original tudo aquilo que não está na máscara
-        result = cv2.bitwise_and(result, result, mask=mask)
 
-        return mask, result, image, image.shape[0], image.shape[1]
+        #retorna a máscara, imagem e altura e largura da imagem
+        return mask, image, image.shape[0], image.shape[1]
 
-    def print_images(self, mask, result, result_edges, file_path, text_file, image_height, image_width):
-        #Utilizando algorítimo para reconhecer retangulos na imagem
-        text_file.write(file_path + "\n")
-        text_file.write(str(image_height) + " " + str(image_width)+"\n")
+    def find_lines(self, file_path, image_height, image_width, mask):
+        #nome do teste (ignora o caminho e a extensão do arquivo)
+        file = os.path.basename(file_path).split('.')[0]
 
+        #inicializa um dataframe para a imagem
+        df = pd.DataFrame(columns=['file', 'x', 'y', 'h', 'w', 'approx'])
+
+        #variáveis para ignorar 20% da imagem nas bordas
         start_image_height = (image_height * 2)/10
         end_image_height = (image_height * 8)/10
         start_image_width = (image_width * 2)/10
         end_image_width = (image_width * 8)/10
 
+        #encontra os contornos da máscara
         cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
-        file = os.path.basename(file_path).split('.')[0]
-
-        df = pd.DataFrame()
+        #para cada contorno
         for cnt in cnts:
+            #área aproximada do contorno
             approx = cv2.contourArea(cnt)
+            #retângulo equivalente do contorno, pontos x e y, altura e largura h e w
             x,y,w,h = cv2.boundingRect(cnt)
+            #area do retângulo acima
             area_draw_rect = w*h
+            #ignora o retângulo se seu x e y se encontra nos 20% das bordas da imagem
             if (start_image_height < y < end_image_height and start_image_width < x < end_image_width):
+                #ignora o retângulo que não tem área maior que 3 e menor que 2000
+                #e que a área aproximada do contorno não ocupa mais de 20% da área do retângulo
                 if (3.0 < approx < 2000 and approx > 2*area_draw_rect/10):
-                    df = pd.concat([df, pd.DataFrame([[file, x, y, h, w, approx, area_draw_rect, image_height, image_width]])], ignore_index=True)
-                    cv2.rectangle(result,(x,y),(x+w,y+h),(0,255,0),2)
-                    text_file.write("w:" + str(w) + " ")
-                    text_file.write("h:" + str(h) + " ")
-                    text_file.write("x:" + str(x) + " ")
-                    text_file.write("y:" + str(y) + " ")
-                    text_file.write(str(approx) + "\n")
-        
-        #se ainda tem mais de 2 retângulos
+                    #insere uma linha no dataframe nome do teste, variáveis do retângulo e área aproximada do contorno
+                    df = pd.concat([df, pd.DataFrame([[file, x, y, h, w, approx]], columns=['file', 'x', 'y', 'h', 'w', 'approx'])], ignore_index=True)
+                    
+        #se ainda tem mais de 2 retângulos (linhas no dataframe)
         if (df.shape[0] > 2):
-            #altura e largura do retangulo tem que ser maior que 5 e a aproximação da sua área tem que ser maior que 50
+            #como encontrou muito vermelho (mais de 2 retângulos)
+            #então os retângulos que contém as prováveis linhas tem que ter:
+            #altura e largura maior que 5 e área aproximada de seu contorno maior que 50
             df = df[(df[df.columns[3]] > 5.0) & (df[df.columns[4]] > 5.0) & (df[df.columns[5]] > 50.0)]
+            
+            #reseta os índices do dataframe
             df.reset_index(drop=True, inplace=True)
+            
             #se ainda tem mais de 1 retângulo
             if (df.shape[0] > 1):
+                #variáveis de centro da imagem
                 center_height = image_height/2
                 center_width = image_width/2
-                for index, row in df.iterrows():
-                    height = df.at[index, 3]
-                    width = df.at[index, 4]
-                    x_rect = df.at[index, 1]
-                    y_rect = df.at[index, 2]
+                #para cada linha do dataframe
+                for index in range(0, df.shape[0]):
+                    #variáveis de altura, largura e pontos x e y do retângulo inserido na linha
+                    height = df.at[index, 'h']
+                    width = df.at[index, 'w']
+                    x_rect = df.at[index, 'x']
+                    y_rect = df.at[index, 'y']
                     #se a altura do retângulo é maior que sua largura
                     if (height > width):
+                        #ponto onde termina a altura do retângulo
                         end_height_dist = y_rect + height
+                        #se o centro da altura da imagem está contido no retângulo em relação a sua altura
                         if (y_rect <= center_height <= end_height_dist):
+                            #guarda nessa linha do dataframe que a distância entre o retângulo e o centro da imagem é zero (em relação a altura)
                             df.at[index, 6] = 0.0
-                            df.at[index, 9] = 'h'
+                            #guarda o caractere 'h' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a altura
+                            df.at[index, 7] = 'h'
+                        #caso contrário
                         else:
+                            #calcula a distância em módulo do ponto inicial (y) e final do centro da imagem em relação a altura
                             start_center_height_dist = abs(y_rect - center_height)
                             end_center_height_dist = abs(end_height_dist - center_height)
-                            if (start_center_height_dist <= end_center_height_dist):
+                            #se a variável em relação ao início do retângulo é menor que a em relação ao final dele
+                            if (start_center_height_dist < end_center_height_dist):
+                                #guarda nessa linha do dataframe a distância entre a variável em relação ao início do retângulo e o centro da imagem (em relação a altura)
                                 df.at[index, 6] = start_center_height_dist
-                                df.at[index, 9] = 'h'
+                                #guarda o caractere 'h' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a altura
+                                df.at[index, 7] = 'h'
+                            #caso contrário
                             else:
+                                #guarda nessa linha do dataframe a distância entre a variável em relação ao final do retângulo e o centro da imagem (em relação a altura)
                                 df.at[index, 6] = end_center_height_dist
-                                df.at[index, 9] = 'h'
+                                #guarda o caractere 'h' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a altura
+                                df.at[index, 7] = 'h'
+                    #caso contrário
                     else:
+                        #ponto onde termina a largura do retângulo
                         end_width_dist = x_rect + width
+                        #se o centro da largura da imagem está contido no retângulo em relação a sua largura
                         if (x_rect <= center_width <= end_width_dist):
+                            #guarda nessa linha do dataframe que a distância entre o retângulo e o centro da imagem é zero (em relação a largura)
                             df.at[index, 6] = 0.0
-                            df.at[index, 9] = 'w'
+                            #guarda o caractere 'w' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a largura
+                            df.at[index, 7] = 'w'
+                        #caso contrário
                         else:
+                            #calcula a distância em módulo do ponto inicial (x) e final do centro da imagem em relação a largura
                             start_center_width_dist = abs(x_rect - center_width)
                             end_center_width_dist = abs(end_width_dist - center_width)
+                            #se a variável em relação ao início do retângulo é menor que a em relação ao final dele
                             if (start_center_width_dist <= end_center_width_dist):
+                                #guarda nessa linha do dataframe a distância entre a variável em relação ao início do retângulo e o centro da imagem (em relação a largura)
                                 df.at[index, 6] = start_center_width_dist
-                                df.at[index, 9] = 'w'
+                                #guarda o caractere 'w' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a largura
+                                df.at[index, 7] = 'w'
+                            #caso contrário
                             else:
+                                #guarda nessa linha do dataframe a distância entre a variável em relação ao final do retângulo e o centro da imagem (em relação a largura)
                                 df.at[index, 6] = end_center_width_dist
-                                df.at[index, 9] = 'w'
+                                #guarda o caractere 'w' nessa linha do dataframe para identificar que a distância inserida anteriormente é relativa a largura
+                                df.at[index, 7] = 'w'
+                
+                #ordena as linhas do dataframe pela distância calculada anteriormente
                 df.sort_values(by=[6], inplace=True)
+                
+                #remove aquelas linhas em que a distância calculada anteriormente é maior que 50
+                #isso por causa do corte nas imagens, espera-se que as linhas estejam próximas ao centro (em relação a orientação vertical ou horizontal das imagens)
                 df = df[(df[df.columns[6]] <= 50.0)]
+                
+                #reseta os índices do dataframe
                 df.reset_index(drop=True, inplace=True)
+
+                #se ainda tem mais de 1 retângulo
                 if (df.shape[0] > 1):
-                    print(df)
+                    #variável para parar o for mais externo, inicializada com false
                     stop = False
+                    #para cada linha do dataframe menos a última
                     for index in range(0, df.shape[0]-1):
+                        #se a variável citada anteriormente for verdadeira, o for é encerrado
                         if(stop == True):
                             break
+                        #para cada linha seguinte do dataframe (incluindo a última)
                         for index_next_rect in range(index+1, df.shape[0]):
-                            if(df.at[index, 9] == df.at[index_next_rect, 9]):
-                                if(df.at[index, 9] == 'h'):
-                                    y_proximit = abs(df.at[index, 2] - df.at[index_next_rect, 2])
+                            #se a entratégia da distância do centro usada foi a mesma para as duas linhas 'h' ou 'w'
+                            if(df.at[index, 7] == df.at[index_next_rect, 7]):
+                                #se a estratégia foi a de altura, 'h'
+                                if(df.at[index, 7] == 'h'):
+                                    #diferença em módulo dos pontos y das linhas
+                                    y_proximit = abs(df.at[index, 'y'] - df.at[index_next_rect, 'y'])
+                                    #se a diferença é menor ou igual a 3
                                     if (y_proximit <= 3.0):
+                                        #seleciona essas duas linhas (retângulos) como as linhas positivas do teste
+                                        #por causa da próximidade desses retângulos do centro e proximidade do ponto y entre os dois
+                                        #é muito provável que eles sejam as linhas positivas do teste
                                         df = pd.concat([df.loc[[index]], df.loc[[index_next_rect]]])
-                                        print(df)
+                                        #reseta os índices do dataframe
                                         df.reset_index(drop=True, inplace=True)
+                                        #iguala a variável stop a true para encerrar o for externo
                                         stop = True
+                                        #encerra o for interno
                                         break
-                                elif(df.at[index, 9] == 'w'):
-                                    h_proximit = abs(df.at[index, 3] - df.at[index_next_rect, 3])
+                                #se a estratégia foi a de largura, 'w'
+                                elif(df.at[index, 7] == 'w'):
+                                    #diferença em módulo da altura dos retângulos das linhas
+                                    h_proximit = abs(df.at[index, 'h'] - df.at[index_next_rect, 'h'])
+                                    #se a diferença é menor que 2
                                     if (h_proximit < 2.0):
+                                        #seleciona essas duas linhas (retângulos) como as linhas positivas do teste
+                                        #por causa da próximidade desses retângulos do centro e proximidade entre suas alturas
+                                        #é muito provável que eles sejam as linhas positivas do teste
                                         df = pd.concat([df.loc[[index]], df.loc[[index_next_rect]]])
-                                        print(df)
+                                        #reseta os índices do dataframe
                                         df.reset_index(drop=True, inplace=True)
+                                        #iguala a variável stop a true para encerrar o for externo
                                         stop = True
+                                        #encerra o for interno
                                         break
-            if (df.shape[1] == 10):
-                df = df.drop(9, axis=1)
+            #se existir as colunas a mais que foram criadas para a estratégia acima
+            if (df.shape[1] == 7):
+                #deleta essas colunas do dataframe
+                df = df.drop(7, axis=1)
+                df = df.drop(6, axis=1)
         
+        #retorna o dataframe e o nome do teste
+        return df, file
+
+    def draw_found_rectangles(self, df, image):
+        #para cada linha do dataframe
+        for index in range(0, df.shape[0]):
+            #variáveis de altura, largura e pontos x e y do retângulo inserido na linha
+            height = df.at[index, 'h']
+            width = df.at[index, 'w']
+            x = df.at[index, 'x']
+            y = df.at[index, 'y']
+            #desenha o retângulo na imagem
+            cv2.rectangle(image,(x,y),(x+width,y+height),(0,255,0),2)
+
+    def write_results(self, df, file):
+        #se o dataframe estiver vazio
         if(df.shape[0] == 0):
-            df = pd.concat([df, pd.DataFrame([[file, 0, 0, 0, 0, 0, 0, image_height, image_width, 'nenhuma linha encontrada']])], ignore_index=True)
+            #dataframe com o nome do teste e resultado como erro de leitura
+            df = pd.DataFrame([[file, 'erro de leitura']])
+        #se o dataframe conter só 1 linha
         elif(df.shape[0] == 1):
-            df.at[0, 9] = 'negativo'
+            #dataframe com o nome do teste e resultado como negativo
+            df = pd.DataFrame([[file, 'negativo']])
+        #se o dataframe conter só 2 linhas
         elif(df.shape[0] == 2):
-            df.loc[:, 9] = 'positivo'
+            #dataframe com o nome do teste e resultado como positivo
+            df = pd.DataFrame([[file, 'positivo']])
+        #se o dataframe conter mais linhas
         else:
-            df.loc[:, 9] = 'muito vermelho que pode ser uma linha de teste'
-
-        text_file.write("\n")
-        #configuração da janela para aparecer na tela
-        # cv2.namedWindow( "mask", cv2.WINDOW_NORMAL)
-        # cv2.namedWindow('result '+file_path, cv2.WINDOW_NORMAL)
-        # cv2.namedWindow( "result_edges", cv2.WINDOW_NORMAL)
-
-        #mostrar na tela
-        # cv2.imshow('mask', mask)
-        # cv2.imshow('result '+file_path, result)
-        # cv2.imshow('result_edges', result_edges)
-        # cv2.waitKey()
-
+            #dataframe com o nome do teste e resultado como inconclusivo
+            df = pd.DataFrame([[file, 'inconclusivo']])
+        
+        #retorna o dataframe
         return df
 
 if __name__ == "__main__":
