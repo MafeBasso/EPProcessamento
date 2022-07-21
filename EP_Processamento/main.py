@@ -23,14 +23,8 @@ class Main():
             df_resultado = Main.write_results(self, df, file)
             #junta com o dataframe final
             df_final = pd.concat([df_final, df_resultado])
-        #nomeia as colunas do dataframe
-        df_final.columns = ['Imagem', 'Resultado']
-        #ordena os valores por nome da imagem
-        df_final.sort_values(by=['Imagem'], inplace=True)
-        #reseta os índices do datafrane
-        df_final.reset_index(drop=True, inplace=True)
-        #cria um excel chamado dataframe com o dataframe final
-        df_final.to_excel(os.path.join(os.path.join(os.path.abspath(os.path.dirname(__file__))), 'dataframe.xlsx'), index=False)
+        #cria o dataframe de resultado
+        Main.make_result_dataframe(self, df_final, dir_path)
         
     def list_files(self):
         #caminho do diretório desse arquivo
@@ -265,5 +259,29 @@ class Main():
         #retorna o dataframe
         return df
 
+    def make_result_dataframe(self, df_final, dir_path):
+        #nomeia as colunas do dataframe
+        df_final.columns = ['Imagem', 'Resultado']
+        #ordena os valores por nome da imagem
+        df_final.sort_values(by=['Imagem'], inplace=True)
+        #reseta os índices do dataframe
+        df_final.reset_index(drop=True, inplace=True)
+        #lê o dataframe dos resultados esperados
+        df_expected = pd.read_excel(os.path.join(dir_path, 'classificacao_das_imagens.xlsx'))
+        #merge dos dataframes
+        df_final = df_final.merge(df_expected, left_on='Imagem', right_on='ID', suffixes=(False, False))
+        #se o resultado esperado é igual ao resultado encontrado insere 1 senão insere 0 nessa linha em nova coluna 'Iguais'
+        df_final['Iguais'] = np.where(df_final['Resultado']==df_final['Classe'], 1, 0)
+        #renomeia a coluna 'Classe' para 'Esperado'
+        df_final.rename(columns = {'Classe':'Esperado'}, inplace=True)
+        #remove a coluna 'ID'
+        df_final.drop(columns=['ID'], inplace=True)
+        #porcentagem de acerto do algoritmo com 2 casas decimais
+        hit_percentage = round(100*(df_final['Iguais'].sum())/(df_final.shape[0]), 2)
+        #insere a porcentagem de acerto no fim do dataframe na coluna 'Iguais'
+        df_final = pd.concat([df_final, pd.DataFrame([[np.NaN, np.NaN, np.NaN, hit_percentage]], columns=['Imagem', 'Resultado', 'Esperado', 'Iguais'])], ignore_index=True)
+        #cria um excel chamado resultado com o dataframe final
+        df_final.to_excel(os.path.join(dir_path, 'resultado.xlsx'), index=False)
+        
 if __name__ == "__main__":
     Main()
