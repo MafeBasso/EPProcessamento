@@ -37,6 +37,8 @@ class Main():
         return files_path, dir_path
 
     def find_red(self, file_path):
+        #aqui foi utilizada a referência de encontrar vermelho na imagem: https://stackoverflow.com/questions/51225657/detect-whether-a-pixel-is-red-or-not/51228567#51228567
+        
         #leitura da imagem
         image = cv2.imread(file_path)
         
@@ -66,6 +68,7 @@ class Main():
         start_image_width = (image_width * 2)/10
         end_image_width = (image_width * 8)/10
 
+        #aqui foi utilizada a referência de encontrar contornos e o retângulo referente a cada contorno: https://www.pythonpool.com/cv2-boundingrect/
         #encontra os contornos da máscara
         cnts = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = cnts[0] if len(cnts) == 2 else cnts[1]
@@ -235,6 +238,7 @@ class Main():
             width = df.at[index, 'w']
             x = df.at[index, 'x']
             y = df.at[index, 'y']
+            #aqui é utilizada a mesma fonte para desenhar o retângulo: https://www.pythonpool.com/cv2-boundingrect/
             #desenha o retângulo na imagem
             cv2.rectangle(image,(x,y),(x+width,y+height),(0,255,0),2)
 
